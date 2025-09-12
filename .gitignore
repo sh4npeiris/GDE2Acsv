@@ -1,1 +1,8 @@
+# Python cache
 __pycache__/
+
+# Build and distribution folders
+/bin/
+/dist/
+/build/
+/linux_output/
