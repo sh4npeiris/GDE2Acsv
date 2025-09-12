@@ -181,6 +181,27 @@ class DataTransformer:
                 if email_format:
                     result["Email Address"] = working.apply(self.generate_student_email, format_str=email_format.lower(), axis=1)
 
+            source_config = mapping.get("source_files", {})
+            normalized_sources = self.normalize_source_config(source_config)
+            student_source = normalized_sources.get("student_demographic", "")
+            
+            if "EnrollStatus" not in result.columns:
+                # Check if we're using enhanced demographic file
+                if "enrolment status" in working.columns:
+                    # Priority 1: Use the explicit 'enrolment status' column if it exists
+                    result["EnrollStatus"] = working["enrolment status"].apply(
+                        lambda x: str(x).strip() if str(x).strip() in ["Active", "PreReg"] else "Inactive"
+                    )
+                elif "withdraw date" in working.columns:
+                    # Priority 2: If no status column, infer from 'withdraw date'
+                    result["EnrollStatus"] = working["withdraw date"].apply(
+                        lambda x: "Active" if pd.isna(x) or str(x).strip() == "" else "Inactive"
+                    )
+                else:
+                    # Fallback: If neither key column is found, log a warning and default to Active
+                    logger.warning("[Students] Could not find 'enrolment status' or 'withdraw date' column. Defaulting to 'Active'.")
+                    result["EnrollStatus"] = "Active"
+
         if entity == "Staff":
             source_config = mapping.get("source_files", {})
             normalized_sources = self.normalize_source_config(source_config)

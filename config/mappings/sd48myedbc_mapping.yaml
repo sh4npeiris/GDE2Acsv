@@ -20,8 +20,7 @@ mappings:
       "Grade":
         column: "Grade"
         transform: "grade_to_ceds"
-      "EnrollStatus":
-        value: "Active"
+      "EnrollStatus": #auto detected from Enrollment Status or Withdrawal Date fields
       "SchoolCode": "School Number"
       "Homeroom": "Homeroom"
       "PreRegSchoolCode": "Previous school number"
