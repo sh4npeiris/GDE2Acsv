@@ -75,6 +75,8 @@ mappings:
       "School ID": "School Number"
       "Start Date":
         use_academic_year: true
+        # value : "2025-08-25"
+        # use_academic_year: false
       "End Date":
         use_academic_year: true
 
