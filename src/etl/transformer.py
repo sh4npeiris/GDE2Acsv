@@ -224,14 +224,6 @@ class DataTransformer:
         if entity == "Classes":
             source_config = mapping.get("source_files", {})
             normalized_sources = self.normalize_source_config(source_config)
-            
-            # Get schedule data
-            schedule_df = self.get_source_file(raw_data, normalized_sources, "student_schedule")
-            if schedule_df.empty:
-                logger.warning("[Classes] Student schedule data not available")
-                return pd.DataFrame()
-            
-            schedule_df.columns = [col.strip().lower() for col in schedule_df.columns]
             homeroom_grades = global_config.get("homeroom_grades", [])
             final_classes = []
 
@@ -239,72 +231,68 @@ class DataTransformer:
             student_demo_df = self.get_source_file(raw_data, normalized_sources, "student_demographic")
             if not student_demo_df.empty:
                 student_demo_df.columns = [col.strip().lower() for col in student_demo_df.columns]
-                
-                # Get grade column from Students mapping for consistency
                 students_mapping = global_config.get("mappings", {}).get("Students", {})
                 students_field_map = students_mapping.get("field_map", {})
                 grade_config = students_field_map.get("Grade", {})
                 grade_col = grade_config.get("column", "grade").lower() if isinstance(grade_config, dict) else "grade"
-                
                 student_demo_df[grade_col] = student_demo_df[grade_col].apply(self.grade_to_ceds)
-                
                 homeroom_mask = student_demo_df[grade_col].isin(homeroom_grades)
                 homeroom_students = student_demo_df[homeroom_mask]
-                
+
                 if not homeroom_students.empty:
                     homeroom_col = students_field_map.get("Homeroom", "homeroom").lower()
+                    unique_homerooms = homeroom_students.drop_duplicates(subset=["school number", homeroom_col, "teacher id"])
                     
-                    # Get unique homerooms with teacher info
-                    unique_homerooms = homeroom_students.drop_duplicates(
-                        subset=["school number", homeroom_col, "teacher id"]
-                    )
-                    
-                    # Only create homeroom classes if we have valid data
                     if not unique_homerooms.empty and homeroom_col in unique_homerooms.columns:
                         homeroom_classes = unique_homerooms.copy()
                         homeroom_classes["Class ID"] = (
-                            homeroom_classes["school number"].astype(str) + "_" + 
+                            homeroom_classes["school number"].astype(str) + "_" +
                             homeroom_classes[homeroom_col].fillna("UnassignedHomeroom").astype(str) + f"_{self.school_year}"
                         )
-                        
-                        # Build class name using available teacher info
-                        teacher_name_col = "teacher name"  # From student demographic
 
+                        # Build class name
+                        teacher_name_col = "teacher name"
                         def create_homeroom_name(row, homeroom_col, teacher_name_col, year):
                             homeroom = row[homeroom_col]
                             teacher = row[teacher_name_col]
-                            
-                            # Handle missing values
                             has_homeroom = pd.notna(homeroom) and str(homeroom).strip() != ""
                             has_teacher = pd.notna(teacher) and str(teacher).strip() != ""
-                            
                             parts = []
-                            
                             if has_homeroom:
                                 parts.append(str(homeroom))
                             else:
                                 parts.append("Unassigned Homeroom")
-                            
                             if has_teacher:
                                 parts.append(f"- {teacher}")
-                            
                             parts.append(f"({year})")
-                            
                             return " ".join(parts)
 
                         homeroom_classes["Name"] = homeroom_classes.apply(
-                            lambda row: create_homeroom_name(row, homeroom_col, teacher_name_col, self.school_year), 
+                            lambda row: create_homeroom_name(row, homeroom_col, teacher_name_col, self.school_year),
                             axis=1
                         )
                         homeroom_classes["Grade"] = homeroom_classes[grade_col]
                         homeroom_classes["School ID"] = homeroom_classes["school number"]
-                        homeroom_classes["Start Date"] = self.academic_start
-                        homeroom_classes["End Date"] = self.academic_end
+
+                        # Use configured start/end dates from field_map
+                        start_date_config = field_map.get("Start Date", {})
+                        end_date_config = field_map.get("End Date", {})
                         
-                        # Store for enrollment processing
+                        if isinstance(start_date_config, dict) and start_date_config.get("use_academic_year"):
+                            homeroom_classes["Start Date"] = self.academic_start
+                        elif isinstance(start_date_config, dict) and "value" in start_date_config:
+                            homeroom_classes["Start Date"] = start_date_config["value"]
+                        else:
+                            homeroom_classes["Start Date"] = self.academic_start  # Default fallback
+
+                        if isinstance(end_date_config, dict) and end_date_config.get("use_academic_year"):
+                            homeroom_classes["End Date"] = self.academic_end
+                        elif isinstance(end_date_config, dict) and "value" in end_date_config:
+                            homeroom_classes["End Date"] = end_date_config["value"]
+                        else:
+                            homeroom_classes["End Date"] = self.academic_end  # Default fallback
+
                         self.homeroom_classes_df = homeroom_classes[["school number", homeroom_col, "Class ID", "teacher id"]].copy()
-                        
-                        # Add homeroom classes to final result - ensure we only include field_map columns
                         homeroom_output = pd.DataFrame()
                         for tgt_field in field_map.keys():
                             if tgt_field in homeroom_classes.columns:
@@ -312,99 +300,105 @@ class DataTransformer:
                             else:
                                 logger.warning(f"[Classes] Column '{tgt_field}' not found in homeroom classes")
                                 homeroom_output[tgt_field] = pd.NA
-                        
                         final_classes.append(homeroom_output)
                         logger.info(f"[Classes] Created {len(homeroom_classes)} homeroom classes")
 
             # Process Grade 8+ Subject Classes
-            non_homeroom_mask = ~schedule_df["grade"].isin(homeroom_grades)
-            non_homeroom_df = schedule_df[non_homeroom_mask].copy()
-            
-            if not non_homeroom_df.empty:
-                course_df = self.get_source_file(raw_data, normalized_sources, "course_info")
-                staff_df = self.get_source_file(raw_data, normalized_sources, "staff_info")
+            schedule_df = self.get_source_file(raw_data, normalized_sources, "student_schedule")
+            if not schedule_df.empty:
+                schedule_df.columns = [col.strip().lower() for col in schedule_df.columns]
+                non_homeroom_mask = ~schedule_df["grade"].isin(homeroom_grades)
+                non_homeroom_df = schedule_df[non_homeroom_mask].copy()
                 
-                if not course_df.empty:
-                    course_df.columns = [col.strip().lower() for col in course_df.columns]
-                    if "district course code" in non_homeroom_df.columns:
-                        non_homeroom_df.rename(columns={"district course code": "course code"}, inplace=True)
+                if not non_homeroom_df.empty:
+                    course_df = self.get_source_file(raw_data, normalized_sources, "course_info")
+                    staff_df = self.get_source_file(raw_data, normalized_sources, "staff_info")
                     
-                    merged_df = non_homeroom_df.merge(
-                        course_df[["school number", "course code", "title"]], 
-                        on=["school number", "course code"], 
-                        how="left"
-                    )
-                else:
-                    merged_df = non_homeroom_df
-                
-                if not staff_df.empty:
-                    staff_df.columns = [col.strip().lower() for col in staff_df.columns]
-                    merged_df = merged_df.merge(
-                        staff_df[["teacher id", "last name"]], 
-                        on="teacher id", 
-                        how="left"
-                    )
-                
-                # Apply field mapping transformations
-                subject_output = pd.DataFrame()
-                for tgt_field, src_info in field_map.items():
-                    if tgt_field == "Class ID" and isinstance(src_info, dict) and src_info.get("append_year_to_id"):
-                        col_name = src_info.get("column", "").lower()
-                        if col_name in merged_df.columns:
+                    if not course_df.empty:
+                        course_df.columns = [col.strip().lower() for col in course_df.columns]
+                        if "district course code" in non_homeroom_df.columns:
+                            non_homeroom_df.rename(columns={"district course code": "course code"}, inplace=True)
+                        merged_df = non_homeroom_df.merge(
+                            course_df[["school number", "course code", "title"]],
+                            on=["school number", "course code"],
+                            how="left"
+                        )
+                    else:
+                        merged_df = non_homeroom_df
+                    
+                    if not staff_df.empty:
+                        staff_df.columns = [col.strip().lower() for col in staff_df.columns]
+                        merged_df = merged_df.merge(
+                            staff_df[["teacher id", "last name"]],
+                            on="teacher id",
+                            how="left"
+                        )
+                    
+                    # Apply field mapping transformations
+                    subject_output = pd.DataFrame()
+                    for tgt_field, src_info in field_map.items():
+                        if tgt_field == "Class ID" and isinstance(src_info, dict) and src_info.get("append_year_to_id"):
+                            col_name = src_info.get("column", "").lower()
+                            if col_name in merged_df.columns:
+                                subject_output[tgt_field] = merged_df.apply(
+                                    self.generate_class_id,
+                                    mt_id_col=col_name,
+                                    append_year=True,
+                                    axis=1
+                                )
+                            else:
+                                logger.warning(f"[Classes] Column '{col_name}' not found for Class ID generation")
+                                subject_output[tgt_field] = pd.NA
+                        
+                        elif tgt_field == "Name" and isinstance(src_info, dict):
+                            teacher_flag_col = src_info.get("primary_teacher_flag", "").lower()
+                            teacher_last_col = src_info.get("teacher_last_name", "last name").lower()
+                            course_title_col = src_info.get("course_title", "title").lower()
+                            section_letter_col = src_info.get("section_letter", "section letter").lower()
                             subject_output[tgt_field] = merged_df.apply(
-                                self.generate_class_id, 
-                                mt_id_col=col_name, 
-                                append_year=True, 
+                                self.generate_class_name,
+                                teacher_flag_col=teacher_flag_col,
+                                teacher_last_col=teacher_last_col,
+                                course_title_col=course_title_col,
+                                section_letter_col=section_letter_col,
                                 axis=1
                             )
-                        else:
-                            logger.warning(f"[Classes] Column '{col_name}' not found for Class ID generation")
-                            subject_output[tgt_field] = pd.NA
-                            
-                    elif tgt_field == "Name" and isinstance(src_info, dict):
-                        teacher_flag_col = src_info.get("primary_teacher_flag", "").lower()
-                        teacher_last_col = src_info.get("teacher_last_name", "last name").lower()
-                        course_title_col = src_info.get("course_title", "title").lower()
-                        section_letter_col = src_info.get("section_letter", "section letter").lower()
                         
-                        subject_output[tgt_field] = merged_df.apply(
-                            self.generate_class_name,
-                            teacher_flag_col=teacher_flag_col,
-                            teacher_last_col=teacher_last_col,
-                            course_title_col=course_title_col,
-                            section_letter_col=section_letter_col,
-                            axis=1
-                        )
+                        elif tgt_field in ["Start Date", "End Date"] and isinstance(src_info, dict):
+                            if src_info.get("use_academic_year"):
+                                subject_output[tgt_field] = self.academic_start if tgt_field == "Start Date" else self.academic_end
+                            elif "value" in src_info:
+                                subject_output[tgt_field] = src_info["value"]
+                            else:
+                                # Fallback to academic year if no configuration
+                                subject_output[tgt_field] = self.academic_start if tgt_field == "Start Date" else self.academic_end
                         
-                    elif isinstance(src_info, dict) and src_info.get("use_academic_year"):
-                        subject_output[tgt_field] = self.academic_start if tgt_field == "Start Date" else self.academic_end
+                        elif isinstance(src_info, dict) and "column" in src_info:
+                            src_col = src_info["column"].lower()
+                            if src_col in merged_df.columns:
+                                subject_output[tgt_field] = merged_df[src_col]
+                            else:
+                                logger.warning(f"[Classes] Column '{src_col}' not found for field '{tgt_field}'")
+                                subject_output[tgt_field] = pd.NA
                         
-                    elif isinstance(src_info, dict) and "column" in src_info:
-                        src_col = src_info["column"].lower()
-                        if src_col in merged_df.columns:
-                            subject_output[tgt_field] = merged_df[src_col]
-                        else:
-                            logger.warning(f"[Classes] Column '{src_col}' not found for field '{tgt_field}'")
-                            subject_output[tgt_field] = pd.NA
-                            
-                    elif isinstance(src_info, str):
-                        src_col = src_info.lower()
-                        if src_col in merged_df.columns:
-                            subject_output[tgt_field] = merged_df[src_col]
-                        else:
-                            logger.warning(f"[Classes] Column '{src_col}' not found for field '{tgt_field}'")
-                            subject_output[tgt_field] = pd.NA
-                
-                final_classes.append(subject_output)
-                logger.info(f"[Classes] Created {len(subject_output)} subject classes")
+                        elif isinstance(src_info, str):
+                            src_col = src_info.lower()
+                            if src_col in merged_df.columns:
+                                subject_output[tgt_field] = merged_df[src_col]
+                            else:
+                                logger.warning(f"[Classes] Column '{src_col}' not found for field '{tgt_field}'")
+                                subject_output[tgt_field] = pd.NA
+                    
+                    final_classes.append(subject_output)
+                    logger.info(f"[Classes] Created {len(subject_output)} subject classes")
 
             # Combine all classes
             if final_classes:
                 result = pd.concat(final_classes, ignore_index=True).drop_duplicates()
-                logger.info(f"[Classes] Total classes created: {len(result)} (homeroom: {len(homeroom_output) if 'homeroom_output' in locals() else 0}, subject: {len(subject_output) if 'subject_output' in locals() else 0})")
+                logger.info(f"[Classes] Total classes created: {len(result)}")
                 return result
             
-            return pd.DataFrame()
+            return pd.DataFrame()   
 
         if entity == "Enrollments":
             source_config = mapping.get("source_files", {})
