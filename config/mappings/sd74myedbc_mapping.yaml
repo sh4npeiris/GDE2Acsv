@@ -73,9 +73,11 @@ mappings:
       "Grade": "Grade"
       "School ID": "School Number"
       "Start Date":
-        use_academic_year: true
-      "End Date":
-        use_academic_year: true
+        value : "2025-08-25"
+        use_academic_year: false
+      "End Date": 
+        value: "2026-07-25"
+        use_academic_year: false
 
   Enrollments:
     source_files:

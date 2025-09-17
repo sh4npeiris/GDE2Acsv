@@ -32,7 +32,6 @@ mappings:
         value: ""
       "Email Address": "Student email address"
         #format: "{student number}@sdxx.bc.ca"
-        #value: ""
 
   Staff:
     source_files:
