@@ -88,9 +88,9 @@ mappings:
         column: "Master Timetable ID"
         append_year_to_id: true
       "User ID":
-        "student id col": "Student Number"
-        "staff id col": "Teacher ID"
+        "student_id_col": "Student Number"
+        "staff_id_col": "Teacher ID"
       "Role":
-        "student id col": "Student Number"
-        "staff id col": "Teacher ID"
+        "student_id_col": "Student Number"
+        "staff_id_col": "Teacher ID"
       "School ID": "School Number"

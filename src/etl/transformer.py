@@ -531,7 +531,8 @@ class DataTransformer:
                         logger.error(f"[Enrollments] Error merging homeroom data: {e}")
 
             # Process Grade 8+ Subject Enrollments
-            non_homeroom_mask = ~schedule_df["grade"].isin(homeroom_grades)
+            schedule_df["grade_ceds"] = schedule_df["grade"].apply(self.grade_to_ceds)
+            non_homeroom_mask = ~schedule_df["grade_ceds"].isin(homeroom_grades)
             non_homeroom_enroll_df = schedule_df[non_homeroom_mask].copy()
             
             if not non_homeroom_enroll_df.empty:
@@ -550,7 +551,7 @@ class DataTransformer:
                 # Apply field mapping for User ID and Role
                 user_id_config = field_map.get("User ID", {})
                 role_config = field_map.get("Role", {})
-                
+
                 if isinstance(user_id_config, dict) and isinstance(role_config, dict):
                     student_id_col = user_id_config.get("student_id_col", "").lower()
                     staff_id_col = user_id_config.get("staff_id_col", "").lower()
@@ -560,12 +561,13 @@ class DataTransformer:
                         student_id_col = "student id"
                     if not staff_id_col or staff_id_col not in non_homeroom_enroll_df.columns:
                         staff_id_col = "teacher id"
-                    
+
                     # Student enrollments
                     if student_id_col in non_homeroom_enroll_df.columns and "Class ID" in non_homeroom_enroll_df.columns:
                         student_enroll = non_homeroom_enroll_df[["Class ID", student_id_col, "school number"]].copy()
                         student_enroll.rename(columns={student_id_col: "User ID"}, inplace=True)
                         student_enroll["Role"] = "student"
+                        logger.info(f"[Enrollments] Created {len(student_enroll)} student subject enrollments")
                         final_enrollments.append(student_enroll)
                     
                     # Teacher enrollments
@@ -573,13 +575,14 @@ class DataTransformer:
                         teacher_enroll = non_homeroom_enroll_df[["Class ID", staff_id_col, "school number"]].copy()
                         teacher_enroll.rename(columns={staff_id_col: "User ID"}, inplace=True)
                         teacher_enroll["Role"] = "teacher"
+                        logger.info(f"[Enrollments] Created {len(teacher_enroll)} teacher subject enrollments")
                         final_enrollments.append(teacher_enroll)
                         
                         logger.info(f"[Enrollments] Created {len(student_enroll) if 'student_enroll' in locals() else 0} student and {len(teacher_enroll) if 'teacher_enroll' in locals() else 0} teacher subject enrollments")
             
             if final_enrollments:
                 result = pd.concat(final_enrollments, ignore_index=True).drop_duplicates()
-                
+                logger.info(f"[Enrollments] After concat: {len(result)} rows, before drop_duplicates: {sum(len(df) for df in final_enrollments)} rows")
                 # Ensure School ID column exists - use standard column name
                 if "school number" in result.columns:
                     result.rename(columns={"school number": "School ID"}, inplace=True)
