@@ -14,8 +14,8 @@ mappings:
     field_map:
       "User ID": "Student number"
       "Student Number": "Student number"
-      "First Name": "Legal first name"
-      "Last Name": "Legal surname"
+      "First Name": "Usual first name"
+      "Last Name": "Usual surname"
       "Date of Birth": "Date of birth"
       "Grade":
         column: "Grade"
@@ -24,8 +24,8 @@ mappings:
       "SchoolCode": "School number"
       "Homeroom": "Homeroom"
       "PreRegSchoolCode": "Previous school number"
-      "Preferred First Name": "Usual first name"
-      "Preferred Last Name": "Usual surname"
+      "Preferred First Name": "Legal first name"
+      "Preferred Last Name": "Legal surname"
       "Community Hours":
         value: ""
       "Literacy Test Completed":
@@ -61,6 +61,7 @@ mappings:
       course_info: "CourseInformation.txt"
       staff_info: "StaffInformation.txt"
       student_demographic: "StudentDemographicInformation.txt"
+      class_info: "ClassInformationEnh.txt" 
     field_map:
       "Class ID":
         column: "Master Timetable ID"
