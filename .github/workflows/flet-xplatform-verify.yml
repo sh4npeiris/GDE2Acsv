@@ -1,0 +1,71 @@
+name: flet-xplatform-verify
+
+# THROWAWAY PLAT-0b spike — proves `flet pack` produces a windowed, OFFLINE-bundled
+# artifact on Windows, Linux, and macOS before we invest in the Flet UI port (Plan 0013).
+# Not part of the shipping release pipeline; deleted with the prototype after PLAT-1.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/flet-xplatform-verify]
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: docs/reference/flet-prototype-spike
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # Linux DESKTOP-GUI runtime libs (the Flet client links libsecret + GL/GTK).
+      # A headless server would use the CLI instead, but we harden the desktop path too.
+      - name: Linux desktop GUI runtime deps
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecret-1-0 libgtk-3-0 libgl1 libglib2.0-0 xvfb
+
+      - name: Install pinned Flet stack + build tooling
+        run: python -m pip install "flet==0.85.3" "flet-desktop==0.85.3" "flet-web==0.85.3" "flet-cli==0.85.3" "pyinstaller>=6" pefile psutil
+
+      - name: Report flet + client versions
+        continue-on-error: true
+        run: python -c "import importlib.metadata as m; print('flet', m.version('flet'), '| flet-desktop', m.version('flet-desktop'), '| flet-web', m.version('flet-web'))"
+
+      # Headless warm-up (download+unzip, no window) — the PLAT-0.4 CI pre-seed pattern.
+      - name: Warm client cache
+        run: python -c "import flet_desktop; print('cached at:', flet_desktop.ensure_client_cached())"
+
+      - name: flet pack (windowed, onefile, offline)
+        run: flet pack app.py --name DSyncSpike
+
+      # Linux: the Flet GUI client needs a display to launch (a headless box uses the
+      # CLI). Run the verify under xvfb (virtual display) to exercise the real DESKTOP
+      # path and let the bundled client extract → offline-embedding check passes.
+      - name: Verify offline embedding — Linux desktop (xvfb)
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: xvfb-run -a python docs/reference/flet-prototype-spike/ci_verify_pack.py docs/reference/flet-prototype-spike/dist DSyncSpike
+
+      - name: Verify offline embedding (Windows/macOS)
+        if: runner.os != 'Linux'
+        working-directory: .
+        run: python docs/reference/flet-prototype-spike/ci_verify_pack.py docs/reference/flet-prototype-spike/dist DSyncSpike
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DSyncSpike-${{ matrix.os }}
+          path: docs/reference/flet-prototype-spike/dist/*
+          retention-days: 5
